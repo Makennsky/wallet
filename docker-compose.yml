@@ -1,0 +1,68 @@
+version: '3.8'
+
+x-common-variables: &common-variables
+  WALLET_DATABASE_HOST: db
+  WALLET_DATABASE_PORT: 5432
+  WALLET_DATABASE_USER: ${WALLET_DATABASE_USER}
+  WALLET_DATABASE_PASSWORD: ${WALLET_DATABASE_PASSWORD}
+  WALLET_DATABASE_NAME: ${WALLET_DATABASE_NAME}
+  WALLET_DATABASE_SSLMODE: disable
+  WALLET_DATABASE_MAX_CONNECTIONS: 100
+  WALLET_DATABASE_MAX_IDLE_CONNECTIONS: 10
+  WALLET_TRANSACTION_HISTORY_LIMIT: 100
+  WALLET_MIN_TRANSACTION_AMOUNT: 0.01
+  WALLET_MAX_TRANSACTION_AMOUNT: 1000000
+
+services:
+  wallet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ${DOCKER_TARGET:-development}
+      args:
+        VERSION: ${VERSION:-1.0.0}
+    ports:
+      - "${WALLET_SERVER_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *common-variables
+    volumes:
+      - ./migrations:/app/migrations:ro
+    networks:
+      - wallet-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${WALLET_DATABASE_USER}
+      POSTGRES_PASSWORD: ${WALLET_DATABASE_PASSWORD}
+      POSTGRES_DB: ${WALLET_DATABASE_NAME}
+    volumes:
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${WALLET_DATABASE_PORT:-5432}:5432"
+    networks:
+      - wallet-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WALLET_DATABASE_USER} -d ${WALLET_DATABASE_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  wallet-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
